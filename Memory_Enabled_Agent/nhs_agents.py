@@ -96,6 +96,7 @@ PATIENT_VERIFY_ENDPOINT = f"{NHS_API_BASE}/patients/verify"
 DOCTOR_VERIFY_ENDPOINT = f"{NHS_API_BASE}/doctors/verify"
 MEDICAL_RECORDS_ENDPOINT = f"{NHS_API_BASE}/medical-records/patient"
 MEMORY_MAP_ENDPOINT = f"{NHS_API_BASE}/memory-map"
+ANALYTICS_ENDPOINT = f"{NHS_API_BASE}/analytics/session"
 
 # Qdrant settings
 QDRANT_HOST = os.environ.get("QDRANT_HOST")
@@ -1881,6 +1882,189 @@ async def fetch_knowledge_base_map(customer_id: str, user_type: str) -> Optional
         logger.error(f"Error fetching knowledge base map: {e}")
         return None
 
+async def send_conversation_analytics(
+    customer_id: str,
+    user_id: str,
+    conversation_history: List[Dict[str, Any]],
+    duration_seconds: float,
+    session_start_time: Optional[datetime.datetime],
+    user_type: str
+) -> bool:
+    """Send conversation analytics to the embedding engine API
+
+    Args:
+        customer_id: Organization ID (for Experience App users)
+        user_id: Individual user ID
+        conversation_history: Full conversation transcript
+        duration_seconds: Duration of the conversation in seconds
+        session_start_time: When the session started
+        user_type: Type of user (experience, doctor, patient)
+
+    Returns:
+        True if analytics were sent successfully, False otherwise
+    """
+    try:
+        # Generate conversation summary using OpenAI
+        summary = await generate_conversation_summary(conversation_history)
+
+        # Calculate satisfaction score (simple heuristic for now)
+        satisfaction_score = calculate_satisfaction_score(conversation_history, duration_seconds)
+
+        # Prepare analytics payload
+        analytics_data = {
+            "customer_id": customer_id,
+            "user_id": user_id,
+            "transcript": conversation_history,
+            "duration_seconds": duration_seconds,
+            "summary": summary,
+            "satisfaction_score": satisfaction_score,
+            "session_date": session_start_time.isoformat() if session_start_time else datetime.datetime.now().isoformat(),
+            "user_type": user_type
+        }
+
+        # Send to analytics API
+        headers = {
+            'X-Admin-API-Key': NHS_API_KEY,
+            'Content-Type': 'application/json'
+        }
+
+        logger.info(f"Sending analytics to {ANALYTICS_ENDPOINT}")
+        logger.info(f"Analytics summary: {summary[:100]}... | Duration: {duration_seconds}s | Satisfaction: {satisfaction_score}/5")
+
+        response = requests.post(
+            ANALYTICS_ENDPOINT,
+            json=analytics_data,
+            headers=headers,
+            timeout=10
+        )
+
+        if response.status_code in [200, 201]:
+            logger.info(f"Analytics sent successfully: {response.status_code}")
+            return True
+        else:
+            logger.error(f"Failed to send analytics: {response.status_code} - {response.text}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error sending conversation analytics: {e}")
+        return False
+
+async def generate_conversation_summary(conversation_history: List[Dict[str, Any]]) -> str:
+    """Generate a concise summary of the conversation using OpenAI
+
+    Args:
+        conversation_history: List of conversation messages
+
+    Returns:
+        A short summary of the conversation topic
+    """
+    try:
+        # Extract only user and assistant messages (skip system messages)
+        messages = [
+            msg for msg in conversation_history
+            if msg.get("role") in ["user", "assistant"]
+        ]
+
+        if not messages:
+            return "No conversation"
+
+        # Create a prompt for summarization
+        conversation_text = "\n".join([
+            f"{msg['role'].capitalize()}: {msg['content']}"
+            for msg in messages[:10]  # Limit to first 10 messages to save tokens
+        ])
+
+        # Use OpenAI to generate summary
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that summarizes medical conversations. Provide a very brief (5-10 words) summary of the main topic discussed."
+                },
+                {
+                    "role": "user",
+                    "content": f"Summarize this conversation in 5-10 words:\n\n{conversation_text}"
+                }
+            ],
+            max_tokens=50,
+            temperature=0.3
+        )
+
+        summary = response.choices[0].message.content.strip()
+        logger.info(f"Generated summary: {summary}")
+        return summary
+
+    except Exception as e:
+        logger.error(f"Error generating conversation summary: {e}")
+        # Fallback: use first user message as summary
+        for msg in conversation_history:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                return content[:50] + "..." if len(content) > 50 else content
+        return "Medical consultation"
+
+def calculate_satisfaction_score(conversation_history: List[Dict[str, Any]], duration_seconds: float) -> float:
+    """Calculate a satisfaction score based on conversation metrics
+
+    This is a simple heuristic. In the future, this could be replaced with:
+    - Post-call survey
+    - AI-based sentiment analysis
+    - User feedback
+
+    Args:
+        conversation_history: List of conversation messages
+        duration_seconds: Duration of the conversation
+
+    Returns:
+        Satisfaction score from 1.0 to 5.0
+    """
+    try:
+        # Count user and assistant messages
+        user_messages = [msg for msg in conversation_history if msg.get("role") == "user"]
+        assistant_messages = [msg for msg in conversation_history if msg.get("role") == "assistant"]
+
+        # Base score
+        score = 3.0
+
+        # Positive factors:
+        # 1. Longer conversations indicate engagement (up to 5 minutes)
+        if duration_seconds > 60:  # More than 1 minute
+            score += 0.5
+        if duration_seconds > 180:  # More than 3 minutes
+            score += 0.5
+
+        # 2. Multiple exchanges indicate engagement
+        if len(user_messages) >= 3:
+            score += 0.3
+        if len(user_messages) >= 5:
+            score += 0.2
+
+        # 3. Balanced conversation (not too one-sided)
+        if len(user_messages) > 0 and len(assistant_messages) > 0:
+            ratio = len(assistant_messages) / len(user_messages)
+            if 0.8 <= ratio <= 1.5:  # Roughly balanced
+                score += 0.3
+
+        # Negative factors:
+        # 1. Very short conversations might indicate issues
+        if duration_seconds < 30:
+            score -= 1.0
+
+        # 2. Very few messages might indicate issues
+        if len(user_messages) < 2:
+            score -= 0.5
+
+        # Cap the score between 1.0 and 5.0
+        score = max(1.0, min(5.0, score))
+
+        return round(score, 1)
+
+    except Exception as e:
+        logger.error(f"Error calculating satisfaction score: {e}")
+        return 3.5  # Default neutral score
+
 async def entrypoint(ctx: JobContext):
     """Main entry point for the NHS LiveKit agent"""
     logger.info(f"Connecting to room {ctx.room.name}")
@@ -2195,19 +2379,21 @@ async def entrypoint(ctx: JobContext):
         async def end_of_session():
             # Process conversation for memory storage
             await nhs_agent.process_conversation()
-            
+
             # Log conversation summary
             user_messages = [msg for msg in nhs_agent.conversation_history if msg["role"] == "user"]
             agent_messages = [msg for msg in nhs_agent.conversation_history if msg["role"] == "assistant"]
-            
+
             if user_messages:
                 # Calculate conversation statistics
                 conversation_duration = None
+                session_start_time = None
                 if len(nhs_agent.conversation_history) >= 2:
                     first_msg_time = datetime.datetime.fromisoformat(nhs_agent.conversation_history[0]["timestamp"])
                     last_msg_time = datetime.datetime.fromisoformat(nhs_agent.conversation_history[-1]["timestamp"])
                     conversation_duration = (last_msg_time - first_msg_time).total_seconds()
-                
+                    session_start_time = first_msg_time
+
                 # Log summary
                 logger.info("=" * 50)
                 logger.info("CONVERSATION SUMMARY")
@@ -2217,14 +2403,30 @@ async def entrypoint(ctx: JobContext):
                 logger.info(f"Total messages: {len(nhs_agent.conversation_history)}")
                 logger.info(f"User messages: {len(user_messages)}")
                 logger.info(f"Agent messages: {len(agent_messages)}")
-                
+
                 if conversation_duration:
                     minutes = int(conversation_duration // 60)
                     seconds = int(conversation_duration % 60)
                     logger.info(f"Conversation duration: {minutes}m {seconds}s")
-                
+
                 logger.info("=" * 50)
-            
+
+                # Send analytics for Experience App users
+                if user_type == "experience" and customer_id and user_id:
+                    try:
+                        logger.info("Sending analytics to embedding engine...")
+                        await send_conversation_analytics(
+                            customer_id=customer_id,
+                            user_id=user_id,
+                            conversation_history=nhs_agent.conversation_history,
+                            duration_seconds=conversation_duration or 0,
+                            session_start_time=session_start_time,
+                            user_type=user_type
+                        )
+                        logger.info("Analytics sent successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to send analytics: {e}")
+
             # Log usage metrics
             summary = usage_collector.get_summary()
             logger.info(f"Usage: {summary}")
