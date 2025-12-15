@@ -78,6 +78,7 @@ DOCTOR_SUFFIX = "-doctor"
 PATIENT_SUFFIX = "-patient"
 DEMO_SUFFIX = "-hexaidemo"
 INTRO_SUFFIX = "-intro"
+EXPERIENCE_PREFIX = "hexai-experience-"  # Experience App room prefix
 ROOM_VALIDATION_ERROR = "Room name does not match required pattern"
 
 # Import demo agents module
@@ -1731,8 +1732,14 @@ class NHSAgent:
         return False
 
 def validate_room_name(room_name: str) -> Optional[str]:
-    """Validate that the room name ends with one of the required suffixes"""
-    if room_name.endswith(DOCTOR_SUFFIX):
+    """Validate that the room name ends with one of the required suffixes or starts with Experience App prefix"""
+    # Check for Experience App rooms first (they have a different pattern)
+    if room_name.startswith(EXPERIENCE_PREFIX):
+        # Experience App rooms: hexai-experience-{random8}-{userType}
+        # We treat all Experience App users as doctors (medical professionals)
+        logger.info(f"Detected Experience App room: {room_name}")
+        return "experience"
+    elif room_name.endswith(DOCTOR_SUFFIX):
         return "doctor"
     elif room_name.endswith(PATIENT_SUFFIX):
         return "patient"
@@ -1992,7 +1999,8 @@ async def entrypoint(ctx: JobContext):
                     user_id = nhs_number
                     user_data = await fetch_patient_data(nhs_number)
                     logger.info(f"Fetched patient data: {user_data}")
-            elif user_type == "doctor":
+            elif user_type == "doctor" or user_type == "experience":
+                # For Experience App users, treat them as doctors (medical professionals)
                 registration_number = parsed_metadata.get('registration_number', '')
                 if not registration_number:
                     # Try alternate casing
@@ -2032,7 +2040,9 @@ async def entrypoint(ctx: JobContext):
     if customer_id:
         try:
             logger.info(f"Attempting to fetch dynamic knowledge base map for customer_id: {customer_id}")
-            knowledge_base_map = await fetch_knowledge_base_map(customer_id, user_type)
+            # For Experience App users, use "doctor" as the user_type for knowledge base selection
+            kb_user_type = "doctor" if user_type == "experience" else user_type
+            knowledge_base_map = await fetch_knowledge_base_map(customer_id, kb_user_type)
             if knowledge_base_map:
                 logger.info(f"Successfully fetched dynamic knowledge base map with {len(knowledge_base_map.get('memory_map', {}).get('knowledgebases', []))} knowledge bases")
             else:
@@ -2050,6 +2060,7 @@ async def entrypoint(ctx: JobContext):
     if user_type == "patient":
         system_prompt = create_patient_system_prompt(user_data)
     else:
+        # Both "doctor" and "experience" user types use doctor system prompt
         system_prompt = create_doctor_system_prompt(user_data)
     
     # Initialize the chat context with the system prompt
@@ -2225,11 +2236,14 @@ async def entrypoint(ctx: JobContext):
         agent.start(ctx.room, participant)
         
         # Create welcome message based on user type
-        if user_type == "patient":
+        if user_type == "experience":
+            # Experience App users get a simplified, platform-specific greeting
+            welcome_message = create_experience_welcome(user_data)
+        elif user_type == "patient":
             welcome_message = create_patient_welcome(user_data)
         else:
             welcome_message = create_doctor_welcome(user_data)
-        
+
         # Send welcome message
         await agent.say(welcome_message, allow_interruptions=True)
         
@@ -2453,7 +2467,18 @@ def create_doctor_welcome(doctor_data: DoctorData) -> str:
         welcome_message = f"Hello {doctor_data.full_name}, welcome to the NHS clinical assistant. I'm here to support your work{specialty}. How can I assist you today?"
     else:
         welcome_message = "Hello Doctor, welcome to the NHS clinical assistant. I'm here to support your clinical work. How can I assist you today?"
-    
+
+    return welcome_message
+
+def create_experience_welcome(user_data: Union[PatientData, DoctorData]) -> str:
+    """Create welcome message for Experience App users"""
+    # Experience App users are medical professionals using the platform
+    # We provide a friendly, professional greeting without NHS-specific branding
+    if user_data.full_name:
+        welcome_message = f"Hello {user_data.full_name}, welcome to your AI medical assistant. I have access to medical literature on critical care, anesthesia, and clinical crisis management. How can I help you today?"
+    else:
+        welcome_message = "Hello, welcome to your AI medical assistant. I have access to medical literature on critical care, anesthesia, and clinical crisis management. How can I help you today?"
+
     return welcome_message
 
 if __name__ == "__main__":
