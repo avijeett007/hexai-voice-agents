@@ -1,53 +1,49 @@
 version: '3.8'
 
 services:
-  oyos-memory-agent:
+  nhs-agent:
     build:
       context: .
-      dockerfile: Dockerfile.memory
-    container_name: oyos-memory-agent
+      dockerfile: Dockerfile
+    container_name: hexai-livekit-agent
     restart: unless-stopped
     ports:
       - "8080:8080"  # Main LiveKit agents port
       - "7880:7880"  # Additional port for LiveKit web interface (if needed)
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
-      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
-      - LIVEKIT_URL=${LIVEKIT_URL}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - DISC_SUMMARY_API_URL=${DISC_SUMMARY_API_URL}
-      - DISC_SUMMARY_API_KEY=${DISC_SUMMARY_API_KEY}
-      - CEREBRAS_API_KEY=${CEREBRAS_API_KEY}
-      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
-      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
-      - QDRANT_HOST=${QDRANT_HOST}
-      - QDRANT_PORT=${QDRANT_PORT:-6333}
-      - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - QDRANT_TLS=${QDRANT_TLS:-true}
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_KEY=${SUPABASE_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./data:/app/data
-      - ./.env:/app/.env
-      - ./models:/app/models
-      - ./config:/app/config
       - ./logs:/app/logs
+      - ./.env:/app/.env:ro  # Read-only mount for security
     networks:
-      - oyos-network
-    # If you want to check logs directly
+      - hexai-network
+    healthcheck:
+      test: ["CMD", "ps", "aux", "|", "grep", "python", "|", "grep", "nhs_agents.py", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # Logging configuration
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "3"
+        max-file: "5"
+        compress: "true"
+    # Resource limits (adjust based on your server capacity)
     deploy:
       resources:
         limits:
+          cpus: '2.0'
           memory: 4G
         reservations:
+          cpus: '1.0'
           memory: 2G
 
 networks:
-  oyos-network:
+  hexai-network:
     driver: bridge

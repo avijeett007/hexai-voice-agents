@@ -15,14 +15,14 @@ RUN apt-get update && apt-get install -y \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy and install requirements
-COPY requirements.txt .
+# Copy and install requirements (use Docker-specific requirements for pinned versions)
+COPY requirements-docker.txt .
 
 # Install PyTorch first separately (better stability)
 RUN pip install --no-cache-dir torch==2.0.0
 
 # Install remaining dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements-docker.txt
 
 # Final stage
 FROM python:3.10-slim
