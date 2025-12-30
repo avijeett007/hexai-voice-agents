@@ -1,5 +1,5 @@
 # Build stage
-FROM python:3.10-slim as builder
+FROM python:3.11-slim as builder
 
 WORKDIR /app
 
@@ -19,13 +19,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY requirements-docker.txt .
 
 # Install PyTorch first separately (better stability)
-RUN pip install --no-cache-dir torch==2.0.0
+RUN pip install --no-cache-dir torch==2.5.1
 
 # Install remaining dependencies
 RUN pip install --no-cache-dir -r requirements-docker.txt
 
 # Final stage
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 

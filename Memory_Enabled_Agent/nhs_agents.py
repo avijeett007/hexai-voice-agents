@@ -2666,7 +2666,7 @@ def create_doctor_welcome(doctor_data: DoctorData) -> str:
     """Create welcome message for doctors"""
     if doctor_data.full_name:
         specialty = f" in {doctor_data.specialty}" if doctor_data.specialty else ""
-        welcome_message = f"Hello {doctor_data.full_name}, welcome to the NHS clinical assistant. I'm here to support your work{specialty}. How can I assist you today?"
+        welcome_message = f"Hello {doctor_data.full_name}, welcome to the NHS clinical assistant. I'm here to support your work in {specialty}. How can I assist you today?"
     else:
         welcome_message = "Hello Doctor, welcome to the NHS clinical assistant. I'm here to support your clinical work. How can I assist you today?"
 
@@ -2677,9 +2677,9 @@ def create_experience_welcome(user_data: Union[PatientData, DoctorData]) -> str:
     # Experience App users are medical professionals using the platform
     # We provide a friendly, professional greeting without NHS-specific branding
     if user_data.full_name:
-        welcome_message = f"Hello {user_data.full_name}, welcome to your AI medical assistant. I have access to medical literature on critical care, anesthesia, and clinical crisis management. How can I help you today?"
+        welcome_message = f"Hello {user_data.full_name}, welcome to your AI medical assistant. How can I help you today?"
     else:
-        welcome_message = "Hello, welcome to your AI medical assistant. I have access to medical literature on critical care, anesthesia, and clinical crisis management. How can I help you today?"
+        welcome_message = "Hello, welcome to your AI medical assistant. How can I help you today?"
 
     return welcome_message
 

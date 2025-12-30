@@ -27,10 +27,10 @@ if ! docker info > /dev/null 2>&1; then
     exit 1
 fi
 
-# Check if docker-compose is available
-if ! command -v docker-compose &> /dev/null; then
-    echo "❌ Error: docker-compose is not installed!"
-    echo "Please install docker-compose and try again."
+# Check if docker compose is available
+if ! docker compose version &> /dev/null; then
+    echo "❌ Error: docker compose is not available!"
+    echo "Please install Docker Compose plugin and try again."
     exit 1
 fi
 
@@ -51,27 +51,27 @@ case $choice in
     1)
         echo ""
         echo "🔨 Building and starting agent..."
-        docker-compose up -d
+        docker compose up -d
         echo ""
         echo "✅ Agent started successfully!"
         echo ""
-        echo "View logs with: docker-compose logs -f"
+        echo "View logs with: docker compose logs -f"
         ;;
     2)
         echo ""
         echo "🔨 Rebuilding agent from scratch..."
-        docker-compose down
-        docker-compose build --no-cache
-        docker-compose up -d
+        docker compose down
+        docker compose build --no-cache
+        docker compose up -d
         echo ""
         echo "✅ Agent rebuilt and started successfully!"
         echo ""
-        echo "View logs with: docker-compose logs -f"
+        echo "View logs with: docker compose logs -f"
         ;;
     3)
         echo ""
         echo "🛑 Stopping agent..."
-        docker-compose down
+        docker compose down
         echo ""
         echo "✅ Agent stopped successfully!"
         ;;
@@ -79,19 +79,19 @@ case $choice in
         echo ""
         echo "📋 Showing logs (Ctrl+C to exit)..."
         echo ""
-        docker-compose logs -f
+        docker compose logs -f
         ;;
     5)
         echo ""
         echo "📊 Agent Status:"
         echo "==============="
-        docker-compose ps
+        docker compose ps
         echo ""
         echo "Health Status:"
         docker inspect hexai-livekit-agent --format='{{.State.Health.Status}}' 2>/dev/null || echo "Container not running"
         echo ""
         echo "Recent Logs:"
-        docker-compose logs --tail=20
+        docker compose logs --tail=20
         ;;
     *)
         echo "Invalid choice. Exiting."
